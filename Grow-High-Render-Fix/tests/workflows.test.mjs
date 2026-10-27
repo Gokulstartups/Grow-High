@@ -1,0 +1,41 @@
+import {test,before,after} from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtempSync} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {createWorkflows} from '../workflows.mjs';
+const base='http://127.0.0.1:14183',data=mkdtempSync(path.join(os.tmpdir(),'gh-workflows-'));let child,cookie;
+before(async()=>{child=spawn(process.execPath,['server.mjs'],{cwd:path.resolve(import.meta.dirname,'..'),env:{...process.env,PORT:'14183',GH_DATA_DIR:data},stdio:['ignore','pipe','pipe']});await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Startup timeout')),10000);child.stdout.on('data',d=>{if(String(d).includes('ready')){clearTimeout(timer);resolve();}});child.on('exit',()=>reject(Error('Server exited')));});});
+after(()=>child?.kill());
+async function req(route,b,c=cookie){const r=await fetch(base+'/api/'+route,{method:b?'POST':'GET',headers:{'Content-Type':'application/json',Origin:base,...(c?{Cookie:c}:{})},body:b?JSON.stringify(b):undefined});return {status:r.status,body:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0]};}
+async function ok(route,b,c){const r=await req(route,b,c);assert.equal(r.status,200,JSON.stringify(r.body));return r.body;}
+test('partial receipts, returns, supplier balances, revisions and approval recurrence',async()=>{
+ const auth=await req('register',{email:'workflow@example.com',password:'WorkflowTest!2026',name:'Owner',company:'QA'});assert.equal(auth.status,200);cookie=auth.cookie;
+ let s=await ok('state'),warehouse=s.warehouses[0].id;
+ const supplier=await ok('contacts',{kind:'suppliers',name:'Vendor'}),customer=await ok('contacts',{kind:'customers',name:'Buyer'});
+ const product=await ok('products',{name:'Widget',sku:'W1',type:'Product',price:'20',cost:'10',reorder:0});
+ let p=await ok('purchases',{supplierId:supplier.id,warehouse,due:'2026-12-01',lines:[{productId:product.id,quantity:5,cost:'10'}]});
+ const receipt={id:p.id,key:'receipt-1',lines:[{index:0,quantity:2}]};p=await ok('purchases/receive',receipt);assert.equal(p.status,'Partially received');await ok('purchases/receive',receipt);
+ assert.equal((await req('purchases/receive',{id:p.id,lines:[{index:0,quantity:4}]})).status,400);
+ p=await ok('purchases/receive',{id:p.id});assert.equal(p.status,'Received');
+ await ok('purchases/return',{id:p.id,key:'return1',index:0,quantity:1,reason:'Damaged'});
+ assert.equal((await req('purchases/return',{id:p.id,key:'return2',index:0,quantity:5,reason:'Too many'})).status,400);
+ s=await ok('state');assert.equal(s.products[0].stock[warehouse],4);assert.equal(s.receipts.length,2);
+ const bill=await ok('supplier-bills',{supplierId:supplier.id,purchaseId:p.id,reference:'V1',amount:'50',date:'2026-10-21',due:'2026-12-01'});
+ const pay={billId:bill.id,key:'pay1',reference:'BANK1',amount:'30'};await ok('supplier-payments',pay);await ok('supplier-payments',pay);assert.equal((await req('supplier-payments',{...pay,key:'pay2',reference:'BANK2'})).status,400);
+ const expense=await ok('expenses',{description:'Office',category:'Office',amount:'10',date:'2026-10-21'});
+ const correction={...expense,amount:'12',reason:'Receipt correction'};await ok('expenses/correct',correction);assert.equal((await req('expenses/correct',correction)).status,409);assert.equal((await ok('history?kind=expenses&id='+expense.id)).length,2);
+ const now=new Date().toISOString().slice(0,10),draft=await ok('documents',{type:'Invoice',customerId:customer.id,companyId:s.companies[0].id,warehouse,date:now,due:now,taxMode:'CGST + SGST',lines:[{productId:product.id,quantity:1,price:'20',discount:0,tax:0}]});
+ await ok('workflow-settings',{invoiceApproval:true});assert.equal((await req('documents/status',{id:draft.id,version:draft.version,status:'Issued'})).status,409);
+ const approval=await ok('approvals/request',{id:draft.id});assert.equal((await req('approvals/decide',{id:approval.id,status:'Approved'})).status,403);
+ await ok('users',{name:'Manager',email:'manager@example.com',password:'WorkflowTest!2026',role:'manager'});const manager=await req('login',{email:'manager@example.com',password:'WorkflowTest!2026'});assert.equal(manager.status,200);
+ await ok('approvals/decide',{id:approval.id,status:'Approved'},manager.cookie);
+ const changed=await ok('documents',{...draft,customerId:customer.id,companyId:draft.company.id||s.companies[0].id,lines:[{productId:product.id,quantity:1,price:'21',discount:0,tax:0}]});
+ assert.equal((await req('documents/status',{id:changed.id,version:changed.version,status:'Issued'})).status,409);
+ const renewed=await ok('approvals/request',{id:changed.id});await ok('approvals/decide',{id:renewed.id,status:'Approved'},manager.cookie);draft.version=changed.version;await ok('documents/status',{id:draft.id,version:draft.version,status:'Issued'});
+ await ok('recurring',{documentId:draft.id,name:'Monthly',frequency:'Monthly',nextRun:now,dueDays:14});assert.equal((await ok('recurring/run',{})).count,1);assert.equal((await ok('recurring/run',{})).count,0);
+ s=await ok('state');const generated=s.documents.find(d=>d.scheduleId);assert.equal(generated.status,'Draft');assert.equal(s.products[0].stock[warehouse],3);
+ await ok('documents/delete-draft',{id:generated.id,version:generated.version});assert.equal((await req('documents/delete-draft',{id:draft.id,version:draft.version})).status,400);
+});
+test('monthly recurrence preserves month-end anchor',()=>{const w=createWorkflows({});assert.equal(w.nextDate('2026-01-31','Monthly',31),'2026-02-28');assert.equal(w.nextDate('2026-02-28','Monthly',31),'2026-03-31');});

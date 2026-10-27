@@ -1,0 +1,10 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+const module={exports:{}};
+new Function('module','exports','require',readFileSync(new URL('../dist/vendor/exceljs.min.js',import.meta.url),'utf8'))(module,module.exports,()=>{throw Error('Unexpected external dependency');});
+const ExcelJS=module.exports,window={};
+vm.runInNewContext(readFileSync(new URL('../dist/excel.js',import.meta.url),'utf8'),{window,ExcelJS,Date,DataView,ArrayBuffer});
+test('Excel exports are genuine xlsx, preserve numbers and treat formula-like names as text',async()=>{const bytes=await window.GrowExcel.buffer([{name:'Inventory',headers:['Name','SKU','Quantity'],rows:[['=HYPERLINK("bad")','001',3]]}]);assert.equal(bytes[0],80);assert.equal(bytes[1],75);const wb=new ExcelJS.Workbook();await wb.xlsx.load(bytes);assert.equal(wb.worksheets[0].getCell('A2').value,'=HYPERLINK("bad")');assert.equal(wb.worksheets[0].getCell('B2').value,'001');assert.equal(wb.worksheets[0].getCell('C2').value,3);const arrayBuffer=bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);const rows=await window.GrowExcel.read({name:'inventory.xlsx',size:bytes.length,arrayBuffer:async()=>arrayBuffer});assert.equal(rows[0].SKU,'001');assert.equal(rows[0].Quantity,'3');});
+test('Excel import rejects formulas, non-xlsx and duplicate headers',async()=>{await assert.rejects(window.GrowExcel.read({name:'data.csv'}),/xlsx/);for(const formula of [false,true]){const wb=new ExcelJS.Workbook(),ws=wb.addWorksheet('Input');ws.addRow(formula?['Name','SKU']:['Name','SKU','SKU']);ws.addRow(formula?[{formula:'1+1',result:2},'TEST']:['Name','A','A']);const bytes=await wb.xlsx.writeBuffer();await assert.rejects(window.GrowExcel.read({name:'input.xlsx',size:bytes.length,arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)}),formula?/plain values/:/unique headings/);}});

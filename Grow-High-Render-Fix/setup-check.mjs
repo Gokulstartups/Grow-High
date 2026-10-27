@@ -1,0 +1,11 @@
+import {existsSync,readFileSync} from 'node:fs';
+import path from 'node:path';
+const root=import.meta.dirname;
+const checks=[['Node.js 24+',Number(process.versions.node.split('.')[0])>=24],...['server.mjs','workflows.mjs','dist/workspace.html','dist/workflows-ui.js','DEPLOYMENT-SETUP.md'].map(f=>[f,existsSync(path.join(root,f))])];
+console.log('Grow High '+JSON.parse(readFileSync(path.join(root,'package.json'))).version+' — local setup check');
+for(const [label,pass] of checks)console.log((pass?'PASS':'FAIL')+' '+label);
+console.log('\nOnline SaaS: NOT CONFIGURED');
+console.log('No external accounts, secrets, billing, or online deployment are created by this check.');
+console.log('Remaining: hosted identity, PostgreSQL migration, HTTPS hosting, email, subscription billing, durable workers, backups and monitoring.');
+console.log('Follow DEPLOYMENT-SETUP.md. Current server remains local-only.');
+if(checks.some(([,pass])=>!pass))process.exitCode=1;
