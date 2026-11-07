@@ -1,0 +1,1 @@
+if(process.env.DATABASE_URL){let safe=false;try{const u=new URL(process.env.DATABASE_URL);safe=process.env.GH_TEST_POSTGRES==='1'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)&&/^\/gh_test_[a-z_]+$/.test(u.pathname);}catch{}if(!safe)throw Error('Tests refuse this DATABASE_URL. Use npm test or npm run test:postgres; neither uses your configured production database.');}

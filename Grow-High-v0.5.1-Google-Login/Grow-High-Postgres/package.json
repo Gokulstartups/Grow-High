@@ -1,0 +1,27 @@
+{
+  "name": "grow-high",
+  "version": "0.5.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node scripts/test-sqlite.mjs",
+    "setup:check": "node setup-check.mjs",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:import": "node scripts/import-sqlite.mjs",
+    "db:verify": "node scripts/import-sqlite.mjs --verify",
+    "db:backup-sqlite": "node scripts/backup-sqlite.mjs",
+    "test:postgres": "node scripts/test-postgres.mjs"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "dependencies": {
+    "google-auth-library": "^11.3.3",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "embedded-postgres": "18.4.0-beta.17"
+  }
+}
+

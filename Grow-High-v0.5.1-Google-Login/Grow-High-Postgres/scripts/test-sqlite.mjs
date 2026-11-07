@@ -1,0 +1,3 @@
+import {spawn} from 'node:child_process';import {readdirSync} from 'node:fs';import path from 'node:path';
+const root=path.resolve(import.meta.dirname,'..');const files=readdirSync(path.join(root,'tests')).filter(f=>f.endsWith('.test.mjs')).map(f=>'tests/'+f);
+const child=spawn(process.execPath,['--test',...files],{cwd:root,env:{...process.env,DATABASE_URL:'',GH_REQUIRE_POSTGRES:'0',GH_TEST_POSTGRES:'',RENDER:'',GH_PUBLIC_URL:'',GH_DB_SSL:'',GH_DB_POOL_SIZE:'',GH_DB_CA_FILE:''},stdio:'inherit',windowsHide:true});child.on('error',()=>{process.exitCode=1;});child.on('exit',code=>{process.exitCode=code??1;});
