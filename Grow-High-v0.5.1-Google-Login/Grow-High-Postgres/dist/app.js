@@ -59,15 +59,23 @@ async function finishGoogle(credential, fields={}){
 }
 async function setupGoogle(){
   const button=$('#google');
+  // Element IDs become window properties. Do not shadow Google's SDK namespace.
+  button.id='google-login-trigger';
+  let container;
   const status=message=>{$('#form-status').hidden=false;$('#form-status').textContent=message;};
   button.onclick=()=>status('Google sign-in is loading. Please try again shortly.');
   try{
     const config=await api('auth/google/config');
     if(!config.clientId){button.onclick=()=>status('Google sign-in is not configured yet. Please use email and password for now.');return;}
     await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';script.async=true;script.onload=resolve;script.onerror=reject;document.head.append(script);});
-    google.accounts.id.initialize({client_id:config.clientId,nonce:config.nonce,auto_select:false,callback:async result=>{try{await finishGoogle(result.credential);}catch(e){status(e.message);}}});
-    const container=document.createElement('div');container.id='google-signin';button.replaceWith(container);
-    google.accounts.id.renderButton(container,{type:'standard',theme:'outline',size:'large',text:'continue_with',shape:'rectangular',width:Math.min(400,container.parentElement.clientWidth)});
-  }catch{button.onclick=()=>status('Google sign-in could not load. Check your connection, refresh, or use email and password.');}
+    const identity=window.google.accounts.id;
+    identity.initialize({client_id:config.clientId,nonce:config.nonce,auto_select:false,callback:async result=>{try{await finishGoogle(result.credential);}catch(e){status(e.message);}}});
+    container=document.createElement('div');container.id='google-signin';button.replaceWith(container);
+    identity.renderButton(container,{type:'standard',theme:'outline',size:'large',text:'continue_with',shape:'rectangular',width:Math.min(400,container.parentElement.clientWidth)});
+  }catch{
+    if(container?.isConnected)container.replaceWith(button);
+    const message='Google sign-in could not load. Check your connection, refresh, or use email and password.';
+    button.onclick=()=>status(message);status(message);
+  }
 }
 if(location.protocol!=='file:')setupGoogle();
