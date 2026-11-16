@@ -1,5 +1,4 @@
 import {createRepository} from './db/repository.mjs';
-import {verifyGoogle} from './google-auth.mjs';
 import {mapAsync} from './db/async.mjs';
 import http from 'node:http';
 import { openDatabase } from './db/index.mjs';
@@ -430,44 +429,7 @@ const workflows = createWorkflows({
 });
 async function api(req, res, url, b) {
   const route = url.pathname;
-  if (route === '/api/auth/google/config' && req.method === 'GET') {
-    limit(req.socket.remoteAddress + ':google-config', 100);
-    const nonce=randomBytes(32).toString('hex');
-    res.setHeader('Set-Cookie', 'gh_google_nonce='+nonce+'; HttpOnly; SameSite=Strict; Path=/; Max-Age=600'+secureCookie);
-    return {clientId:process.env.GOOGLE_CLIENT_ID||'',nonce};
-  }
-  if (route === '/api/auth/google' && req.method === 'POST') {
-    limit(req.socket.remoteAddress + ':google', 25);
-    const nonce=(req.headers.cookie||'').match(/(?:^|;\s*)gh_google_nonce=([a-f0-9]{64})(?:;|$)/)?.[1];
-    const identity=await verifyGoogle(b.credential,nonce,process.env.GOOGLE_CLIENT_ID);
-    const identityId='google:'+hash(identity.subject);
-    const linked=await db.prepare('SELECT tenant,body FROM records WHERE id=? AND kind=?').get(identityId,'authGoogle');
-    let u;
-    if(linked){
-      await db.lockTenant(linked.tenant);
-      u=await db.prepare('SELECT * FROM users WHERE id=? AND tenant=? AND active=1').get(JSON.parse(linked.body).userId,linked.tenant);
-      if(!u) fail('This account is unavailable.',403);
-    }else{
-      u=await db.prepare('SELECT * FROM users WHERE email=?').get(identity.email);
-      if(u){
-        await db.lockTenant(u.tenant);
-        u=await db.prepare('SELECT * FROM users WHERE email=?').get(identity.email);
-        if(!u.active)fail('This account is unavailable.',403);
-        if(!b.password)return {needsPassword:true};
-        if(typeof b.password!=='string'||b.password.length>128||!verify(b.password,u.password))fail('Your existing Grow High password is incorrect.',401);
-      }else{
-        if(!b.company||!b.password)return {needsRegistration:true};
-        const created=await account({email:identity.email,name:identity.name,company:b.company,password:b.password},res);
-        u=created.user;
-        await db.prepare('INSERT INTO records(id,tenant,kind,body,created,updated) VALUES(?,?,?,?,?,?)').run(identityId,u.tenant,'authGoogle',JSON.stringify({userId:u.id}),now(),now());
-        return {ok:true,recovery:created.recovery};
-      }
-      await db.prepare('INSERT INTO records(id,tenant,kind,body,created,updated) VALUES(?,?,?,?,?,?)').run(identityId,u.tenant,'authGoogle',JSON.stringify({userId:u.id}),now(),now());
-      await audit(u,'Linked Google sign-in');
-    }
-    await session(res,u);
-    return {ok:true};
-  }
+  if (route === '/api/auth/google' || route === '/api/auth/google/config') fail('Google sign-in is disabled. Sign in with your email and password.', 410);
   if (route === '/api/register' && req.method === 'POST') {
     limit(req.socket.remoteAddress + ':register', 10);
     return await tx(async () => await account(b, res));
@@ -1075,7 +1037,7 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data:; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   try {
     const expected = `127.0.0.1:${port}`;
     const validHost = cloud ? req.headers.host === publicUrl.host : [expected, `localhost:${port}`].includes(req.headers.host);
@@ -1099,10 +1061,6 @@ const server = http.createServer(async (req, res) => {
       }
       const input = req.method === 'POST' ? await body(req) : {};
       const result = await db.transaction(() => api(req, res, url, input));
-      if(url.pathname==='/api/auth/google' && result?.ok){
-        const cookies=res.getHeader('Set-Cookie');
-        res.setHeader('Set-Cookie',[...(Array.isArray(cookies)?cookies:cookies?[cookies]:[]),'gh_google_nonce=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'+secureCookie]);
-      }
       res.end(JSON.stringify(result));
       return;
     }
@@ -1151,3 +1109,4 @@ process.on('SIGTERM', () => {
     process.exit(0);
   });
 });
+
