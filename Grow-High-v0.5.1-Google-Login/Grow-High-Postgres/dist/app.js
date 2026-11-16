@@ -37,45 +37,9 @@ $('#forgot').onclick=()=>{
   modal('Recover your workspace.','Use the recovery code you saved when creating your account.',`<form id="reset"><label for="reset-email">Email</label><input id="reset-email" name="email" type="email" required autocomplete="email"><label for="reset-code">Recovery code</label><input id="reset-code" name="recovery" required autocomplete="off"><label for="reset-password">New password · at least 10 characters</label><input id="reset-password" name="password" type="password" minlength="10" maxlength="128" required autocomplete="new-password"><button class="primary" type="submit">Reset password</button><p role="status"></p></form>`);
   $('#reset').onsubmit=e=>{e.preventDefault();submitForm(e.target,async()=>{const r=await api('recover',Object.fromEntries(new FormData(e.target)));error(e.target,'Password reset. Save your replacement recovery code: '+r.recovery);e.target.querySelector('button').hidden=true;});};
 };
-const details={privacy:['Your business, your data.','Accounts and business records are saved in the configured server database. Passwords use salted scrypt hashes; sessions use HttpOnly cookies. This local version does not send data to analytics or AI services.'],terms:['Grow High workspace.','Use this workspace for your business workflows. Email, subscriptions and production operations require separate configuration.'],help:['Get started with Grow High.','Use Google or your email and password to sign in, or choose “Create an account” for an empty business workspace. Use your configured application address.']};
+const details={privacy:['Your business, your data.','Accounts and business records are saved in the configured server database. Passwords use salted scrypt hashes; sessions use HttpOnly cookies. This local version does not send data to analytics or AI services.'],terms:['Grow High workspace.','Use this workspace for your business workflows. Email, subscriptions and production operations require separate configuration.'],help:['Get started with Grow High.','Sign in with your work email and password, or choose “Create an account” to set up a workspace. Use your configured application address.']};
 document.querySelectorAll('[data-info]').forEach(b=>b.onclick=()=>modal(...details[b.dataset.info]));
 $('.theme').onclick=()=>{const dark=document.body.classList.toggle('dark');$('.theme').textContent=dark?'☀':'☾';$('.theme').setAttribute('aria-label',dark?'Switch to light theme':'Switch to dark theme');};
 
 if(new URLSearchParams(location.search).get('reason')==='session-expired'){$('#form-status').hidden=false;$('#form-status').textContent='Your session expired. Sign in again to continue. Your unsent assistant question is kept in this tab.';}
 
-async function finishGoogle(credential, fields={}){
-  const result=await api('auth/google',{credential,...fields});
-  if(result.needsPassword||result.needsRegistration){
-    const fresh=result.needsRegistration;
-    modal(fresh?'Create your workspace':'Link your Google account',fresh?'Choose a business name and a backup password.':'Enter your existing Grow High password once to connect Google securely.',`<form id="google-link">${fresh?'<label for="google-company">Business name</label><input id="google-company" name="company" required maxlength="150">':''}<label for="google-password">${fresh?'Backup password · at least 10 characters':'Grow High password'}</label><input id="google-password" name="password" type="password" required ${fresh?'minlength="10"':''} maxlength="128" autocomplete="${fresh?'new-password':'current-password'}"><button type="submit" class="primary">Continue</button><p role="status"></p></form>`);
-    $('#google-link').onsubmit=e=>{e.preventDefault();submitForm(e.target,()=>finishGoogle(credential,Object.fromEntries(new FormData(e.target))));};
-    return;
-  }
-  const next=()=>location.href='/workspace.html'+(new URLSearchParams(location.search).get('next')==='assistant'?'#assistant':'');
-  if(result.recovery){
-    dialog.close();modal('Save your recovery code','Keep this code safe. You can use it to recover your account.');
-    const code=document.createElement('p');code.id='extra-form';code.textContent=result.recovery;code.style.overflowWrap='anywhere';dialog.append(code);$('#dialog-done').onclick=next;
-  }else next();
-}
-async function setupGoogle(){
-  const button=$('#google');
-  // Element IDs become window properties. Do not shadow Google's SDK namespace.
-  button.id='google-login-trigger';
-  let container;
-  const status=message=>{$('#form-status').hidden=false;$('#form-status').textContent=message;};
-  button.onclick=()=>status('Google sign-in is loading. Please try again shortly.');
-  try{
-    const config=await api('auth/google/config');
-    if(!config.clientId){button.onclick=()=>status('Google sign-in is not configured yet. Please use email and password for now.');return;}
-    await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';script.async=true;script.onload=resolve;script.onerror=reject;document.head.append(script);});
-    const identity=window.google.accounts.id;
-    identity.initialize({client_id:config.clientId,nonce:config.nonce,auto_select:false,callback:async result=>{try{await finishGoogle(result.credential);}catch(e){status(e.message);}}});
-    container=document.createElement('div');container.id='google-signin';button.replaceWith(container);
-    identity.renderButton(container,{type:'standard',theme:'outline',size:'large',text:'continue_with',shape:'rectangular',width:Math.min(400,container.parentElement.clientWidth)});
-  }catch{
-    if(container?.isConnected)container.replaceWith(button);
-    const message='Google sign-in could not load. Check your connection, refresh, or use email and password.';
-    button.onclick=()=>status(message);status(message);
-  }
-}
-if(location.protocol!=='file:')setupGoogle();
